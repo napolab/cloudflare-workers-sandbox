@@ -10,6 +10,13 @@ type Environment = {
 
 const app = new Hono<Environment>();
 
+app.get("/posts", async (c) => {
+  const stmt = c.env.DB.prepare("select * from posts;");
+  const out = await stmt.all();
+
+  return c.json(out.results);
+});
+
 app.post(
   "/post",
   validator((v) => ({

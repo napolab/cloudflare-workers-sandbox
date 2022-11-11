@@ -10,7 +10,7 @@
     "wrangler": "2.1.15"
   },
   "scripts": {
-    "dev": "wrangler dev",
+    "dev": "wrangler dev --local --persist",
     "lint": "eslint src"
   },
   "private": true,

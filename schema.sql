@@ -5,4 +5,3 @@ CREATE TABLE posts (
   body TEXT NOT NULL
 );
 
-INSERT INTO posts (title, body) VALUES ('title', 'body');
