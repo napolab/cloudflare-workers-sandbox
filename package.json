@@ -1,5 +1,5 @@
 {
-  "name": "cloudflare-d1-playground",
+  "name": "cloudflare-workers-playground",
   "version": "0.0.0",
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20221111.1",
