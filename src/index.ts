@@ -2,13 +2,30 @@ import { Hono } from "hono";
 import { validator } from "hono/validator";
 
 type Bindings = {
-  DB: any;
+  readonly DB: D1Database;
+  readonly TEST_QUEUE: Queue;
+  readonly TEST_BUCKET: R2Bucket
 };
 type Environment = {
-  Bindings: Bindings;
+  readonly Bindings: Bindings;
 };
 
 const app = new Hono<Environment>();
+
+app.post("/queue", async (c) => {
+  try {
+    const data = await c.req.json()
+    await c.env.TEST_QUEUE.send({ time: Date.now(), ...(data ?? {}) });
+
+    return c.text("ok");
+  } catch (e) {
+    if (e instanceof Error) {
+      return c.json({ message: e.message, name: e.name });
+    } else {
+      return c.json({ message: JSON.stringify(e), name: "unknown-error" });
+    }
+  }
+});
 
 app.get("/posts", async (c) => {
   const stmt = c.env.DB.prepare("select * from posts;");
@@ -35,4 +52,9 @@ app.post(
   }
 );
 
-export default app;
+export default {
+  ...app,
+    async queue(batch: MessageBatch<unknown>, env: Bindings): Promise<void> {
+      await env.TEST_BUCKET.put(`queues/${Date.now()}.log`, JSON.stringify(batch.messages, null, 2));
+  },
+};
