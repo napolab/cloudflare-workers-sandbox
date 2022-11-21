@@ -3,8 +3,8 @@ import { validator } from "hono/validator";
 
 type Bindings = {
   readonly DB: D1Database;
-  readonly TEST_QUEUE: Queue;
-  readonly TEST_BUCKET: R2Bucket
+  readonly QUEUE: Queue;
+  readonly BUCKET: R2Bucket;
 };
 type Environment = {
   readonly Bindings: Bindings;
@@ -14,8 +14,8 @@ const app = new Hono<Environment>();
 
 app.post("/queue", async (c) => {
   try {
-    const data = await c.req.json()
-    await c.env.TEST_QUEUE.send({ time: Date.now(), ...(data ?? {}) });
+    const data = await c.req.json();
+    await c.env.QUEUE.send({ time: Date.now(), ...(data ?? {}) });
 
     return c.text("ok");
   } catch (e) {
@@ -54,7 +54,10 @@ app.post(
 
 export default {
   ...app,
-    async queue(batch: MessageBatch<unknown>, env: Bindings): Promise<void> {
-      await env.TEST_BUCKET.put(`queues/${Date.now()}.log`, JSON.stringify(batch.messages, null, 2));
+  async queue(batch: MessageBatch<unknown>, env: Bindings): Promise<void> {
+    await env.BUCKET.put(
+      `queues/${Date.now()}.log`,
+      JSON.stringify(batch.messages, null, 2)
+    );
   },
 };
