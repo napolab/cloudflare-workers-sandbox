@@ -55,9 +55,17 @@ app.post(
 export default {
   ...app,
   async queue(batch: MessageBatch<unknown>, env: Bindings): Promise<void> {
-    await env.BUCKET.put(
-      `queues/${Date.now()}.log`,
-      JSON.stringify(batch.messages, null, 2)
-    );
+    const random = Math.random();
+
+    try {
+      if (random > 0.5) throw new Error("random error");
+
+      await env.BUCKET.put(
+        `queues/${Date.now()}.log`,
+        JSON.stringify(batch.messages, null, 2)
+      );
+    } catch {
+      batch.retryAll();
+    }
   },
 };
