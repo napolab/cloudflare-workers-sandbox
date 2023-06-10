@@ -11,8 +11,8 @@
     "fmt:eslint": "eslint --fix .",
     "fmt:prettier": "prettier --write .",
     "generate": "npm-run-all -p generate:*",
-    "generate:orm": "drizzle generate:sqlite",
-    "migration": "wrangler d1 migration"
+    "generate:orm": "drizzle-kit generate:sqlite",
+    "migration": "wrangler d1 migrations apply playground"
   },
   "dependencies": {
     "@hono/zod-validator": "^0.1.3",
