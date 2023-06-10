@@ -1,87 +1,85 @@
+import { zValidator } from "@hono/zod-validator";
+import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
-import { validator } from "hono/validator";
+import { prettyJSON } from "hono/pretty-json";
+import { z } from "zod";
 
-type QueueMessage =
-  | {
-      type: "LOG";
-      payload: unknown;
-    }
-  | {
-      type: "POSTS";
-      payload: unknown;
-    };
+import { fireEvent } from "./middleware";
+import { posts } from "./schema";
+
+import type { Context } from "hono";
+
+export * from "./durable-object";
+
+type QueueMessage = {
+  type: "LOG";
+  payload: unknown;
+};
 
 type Bindings = {
   readonly DB: D1Database;
   readonly QUEUE: Queue<QueueMessage>;
   readonly BUCKET: R2Bucket;
+  readonly SHARED_EVENT: DurableObjectNamespace;
 };
 type Environment = {
   readonly Bindings: Bindings;
 };
 
+const notifier = (c: Context<Environment>) => async (data: string) => {
+  const doId = c.env.SHARED_EVENT.idFromName("A");
+  const obj = c.env.SHARED_EVENT.get(doId);
+  const url = new URL(c.req.url);
+  url.pathname = "/event";
+
+  await obj.fetch(url.href, {
+    method: "POST",
+    body: data,
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+};
+
 const app = new Hono<Environment>();
-
-app.get("/websocket", (c) => {
-  const upgradeHeader = c.req.headers.get("Upgrade");
-  if (!upgradeHeader || upgradeHeader !== "websocket") {
-    return new Response("Expected Upgrade: websocket", { status: 426 });
-  }
-
-  const { 0: client, 1: server } = new WebSocketPair();
-
-  server.accept();
-  server.send("hello");
-
-  server.addEventListener("message", (e) => {
-    server.send(e.data);
-  });
-
-  return new Response(null, {
-    status: 101,
-    webSocket: client,
-  });
-});
-
-app.post("/queue", async (c) => {
-  try {
-    const data = await c.req.json();
-    await c.env.QUEUE.send({ type: "LOG", payload: data ?? {} });
-
-    return c.text("ok");
-  } catch (e) {
-    if (e instanceof Error) {
-      return c.json({ message: e.message, name: e.name });
-    } else {
-      return c.json({ message: JSON.stringify(e), name: "unknown-error" });
-    }
-  }
-});
+app.use("*", prettyJSON());
 
 app.get("/posts", async (c) => {
-  const stmt = c.env.DB.prepare("select * from posts;");
-  const out = await stmt.all();
+  const db = drizzle(c.env.DB);
+  const data = await db.select().from(posts).all();
 
-  return c.json(out.results);
+  return c.json(data);
+});
+
+app.get("/posts-events", async (c) => {
+  const doId = c.env.SHARED_EVENT.idFromName("A");
+  const obj = c.env.SHARED_EVENT.get(doId);
+
+  const url = new URL(c.req.url);
+  url.pathname = "/events";
+  const response = await obj.fetch(url, {
+    headers: c.req.headers,
+  });
+
+  return response;
 });
 
 app.post(
   "/post",
-  validator((v) => ({
-    title: v.json("title").isRequired(),
-    body: v.json("body").isRequired(),
-  })),
+  zValidator("json", z.object({ title: z.string(), body: z.string() })),
+  fireEvent<Environment>(notifier),
   async (c) => {
-    const res = c.req.valid();
+    const res = c.req.valid("json");
+    const db = drizzle(c.env.DB);
 
-    const stmt = c.env.DB.prepare(
-      "insert into posts (title, body) values (?, ?)"
-    );
-    const out = await stmt.bind(res.title, res.body).run();
+    await db.insert(posts).values({
+      title: res.title,
+      body: res.body,
+      createdAt: new Date(),
+    });
+    const result = await db.select().from(posts).all();
 
-    await c.env.QUEUE.send({ type: "POSTS", payload: out });
-
-    return c.json(out);
+    return c.json(result);
   }
 );
 
@@ -100,9 +98,6 @@ export default {
           case "LOG":
             log.push(message);
             break;
-          case "POSTS":
-            posts.push(message);
-            break;
         }
       }
 
@@ -112,19 +107,7 @@ export default {
           JSON.stringify(batch.messages, null, 2)
         );
       }
-      if (posts.length > 0) {
-        const json = JSON.stringify(
-          posts.map((post) => post.body.payload),
-          null,
-          2
-        );
-
-        const ws = new WebSocket("ws://127.0.0.1:8787/websocket");
-        ws.send(json);
-        ws.close();
-      }
     } catch (e) {
-      console.log(e);
       batch.retryAll();
     }
   },
