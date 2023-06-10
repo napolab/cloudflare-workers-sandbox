@@ -1,7 +1,6 @@
 import { zValidator } from "@hono/zod-validator";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
-import { prettyJSON } from "hono/pretty-json";
 import { z } from "zod";
 
 import { fireEvent } from "./middleware";
@@ -26,38 +25,34 @@ type Environment = {
   readonly Bindings: Bindings;
 };
 
-const notifier = (c: Context<Environment>) => async (data: string) => {
-  const doId = c.env.SHARED_EVENT.idFromName("A");
-  const obj = c.env.SHARED_EVENT.get(doId);
-  const url = new URL(c.req.url);
-  url.pathname = "/event";
+const sharedEvent = (c: Context<Environment>) => (type: string) => {
+  const doId = c.env.SHARED_EVENT.idFromName(type);
 
-  await obj.fetch(url.href, {
-    method: "POST",
-    body: data,
-    headers: {
-      "Content-Type": "application/json",
-    },
-  });
+  return c.env.SHARED_EVENT.get(doId);
 };
 
+const notifier =
+  (type: string) => (c: Context<Environment>) => async (data: string) => {
+    const obj = sharedEvent(c)(type);
+
+    await obj.fetch(new URL("/event", c.req.url), {
+      method: "POST",
+      body: data,
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+  };
+
 const app = new Hono<Environment>();
-app.use("*", prettyJSON());
 
 app.get("/posts", async (c) => {
   const db = drizzle(c.env.DB);
   const data = await db.select().from(posts).all();
+  if (c.req.headers.get("Upgrade") !== "websocket") return c.json(data);
 
-  return c.json(data);
-});
-
-app.get("/posts-events", async (c) => {
-  const doId = c.env.SHARED_EVENT.idFromName("A");
-  const obj = c.env.SHARED_EVENT.get(doId);
-
-  const url = new URL(c.req.url);
-  url.pathname = "/events";
-  const response = await obj.fetch(url, {
+  const obj = sharedEvent(c)("posts");
+  const response = await obj.fetch(new URL("/events", c.req.url), {
     headers: c.req.headers,
   });
 
@@ -67,7 +62,7 @@ app.get("/posts-events", async (c) => {
 app.post(
   "/post",
   zValidator("json", z.object({ title: z.string(), body: z.string() })),
-  fireEvent<Environment>(notifier),
+  fireEvent<Environment>(notifier("posts")),
   async (c) => {
     const res = c.req.valid("json");
     const db = drizzle(c.env.DB);
