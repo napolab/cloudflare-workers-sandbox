@@ -2,8 +2,6 @@ import { zValidator } from "@hono/zod-validator";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { etag } from "hono/etag";
-import { prettyJSON } from "hono/pretty-json";
 import { z } from "zod";
 
 import { fireEvent, wsupgrade } from "./middleware";
@@ -48,9 +46,8 @@ const notifier =
   };
 
 const app = new Hono<Environment>();
-app.use("/api/*", cors(), etag(), prettyJSON());
+app.use("/api/*", cors());
 app.use("/subscribe/*", wsupgrade());
-app.notFound((c) => c.json({ message: "Not Found", ok: false }, 404));
 
 app.get("/api/posts", async (c) => {
   const db = drizzle(c.env.DB);
@@ -79,7 +76,7 @@ app.post(
       title: res.title,
       body: res.body,
       createdAt: new Date(),
-    });
+    }).run();
     const result = await db.select().from(posts).all();
 
     return c.json(result);
