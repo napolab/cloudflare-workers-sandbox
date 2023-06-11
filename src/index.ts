@@ -1,9 +1,12 @@
 import { zValidator } from "@hono/zod-validator";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
+import { cors } from "hono/cors";
+import { etag } from "hono/etag";
+import { prettyJSON } from "hono/pretty-json";
 import { z } from "zod";
 
-import { fireEvent } from "./middleware";
+import { fireEvent, wsupgrade } from "./middleware";
 import { posts } from "./schema";
 
 import type { Context } from "hono";
@@ -45,12 +48,17 @@ const notifier =
   };
 
 const app = new Hono<Environment>();
+app.use("/api/*", cors(), etag(), prettyJSON());
+app.use("/subscribe/*", wsupgrade());
+app.notFound((c) => c.json({ message: "Not Found", ok: false }, 404));
 
-app.get("/posts", async (c) => {
+app.get("/api/posts", async (c) => {
   const db = drizzle(c.env.DB);
   const data = await db.select().from(posts).all();
-  if (c.req.headers.get("Upgrade") !== "websocket") return c.json(data);
 
+  return c.json(data);
+});
+app.get("/subscribe/posts", async (c) => {
   const obj = sharedEvent(c)("posts");
   const response = await obj.fetch(new URL("/events", c.req.url), {
     headers: c.req.headers,
@@ -60,7 +68,7 @@ app.get("/posts", async (c) => {
 });
 
 app.post(
-  "/post",
+  "/api/post",
   zValidator("json", z.object({ title: z.string(), body: z.string() })),
   fireEvent<Environment>(notifier("posts")),
   async (c) => {
